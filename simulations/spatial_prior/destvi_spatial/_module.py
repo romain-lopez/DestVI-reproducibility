@@ -1,16 +1,12 @@
 import logging
-from typing import OrderedDict, List
+from typing import List, OrderedDict
+
 import numpy as np
 import torch
-
 from scvi import _CONSTANTS
 from scvi._compat import Literal
-from scvi.compose import (
-    BaseModuleClass,
-    FCLayers,
-    LossRecorder,
-    auto_move_data,
-)
+from scvi.compose import (BaseModuleClass, FCLayers, LossRecorder,
+                          auto_move_data)
 from scvi.distributions import NegativeBinomial
 from torch.distributions import Normal
 

@@ -1,20 +1,20 @@
 import logging
-import torch
-from anndata import AnnData
-from scipy.sparse import isspmatrix
+from typing import List, Optional, OrderedDict
 
 import numpy as np
 import pandas as pd
-from typing import Optional, List, OrderedDict
-from scvi.dataloaders import AnnDataLoader
-from scvi.lightning import TrainingPlan
-from . import HSTDeconv
-from scvi.external.condscvi._model import CondSCVI
-from torch.utils.data import TensorDataset, DataLoader
-from torch.optim.lr_scheduler import ReduceLROnPlateau
-
+import torch
+from anndata import AnnData
+from scipy.sparse import isspmatrix
 from scvi.data import register_tensor_from_anndata
+from scvi.dataloaders import AnnDataLoader
+from scvi.external.condscvi._model import CondSCVI
+from scvi.lightning import TrainingPlan
 from scvi.model.base import BaseModelClass
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader, TensorDataset
+
+from . import HSTDeconv
 
 logger = logging.getLogger(__name__)
 
