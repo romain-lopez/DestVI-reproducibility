@@ -6,10 +6,11 @@ import pandas as pd
 import torch
 from anndata import AnnData
 from scipy.sparse import isspmatrix
+from scvi import settings
 from scvi.data import register_tensor_from_anndata
 from scvi.dataloaders import AnnDataLoader
 from scvi.external.condscvi._model import CondSCVI
-from scvi.lightning import TrainingPlan
+from scvi.lightning import Trainer, TrainingPlan
 from scvi.model.base import BaseModelClass
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader, TensorDataset
@@ -218,9 +219,6 @@ class DestVISpatial(BaseModelClass):
         test_indices=None,
         **kwargs,
     ):
-        from scvi import settings
-        from scvi.lightning import Trainer
-
         if use_gpu is None:
             use_gpu = self.use_gpu
         else:
