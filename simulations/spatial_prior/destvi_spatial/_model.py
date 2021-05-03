@@ -7,21 +7,16 @@
 
 
 import logging
-from typing import List, Optional, OrderedDict, Union
+from typing import Optional, OrderedDict
 
 import numpy as np
-import pandas as pd
 import torch
 from anndata import AnnData
-from scipy.sparse import isspmatrix
-from scvi import settings
 from scvi.data import register_tensor_from_anndata
-from scvi.dataloaders import AnnDataLoader
+from scvi.dataloaders import DataSplitter
 from scvi.model import CondSCVI, DestVI
-from scvi.model.base import BaseModelClass
-from scvi.train import Trainer, TrainingPlan
+from scvi.train import TrainingPlan, TrainRunner
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader, TensorDataset
 
 from ._module import HSTDeconv
 
@@ -191,3 +186,51 @@ class DestVISpatial(DestVI):
         rloss = torch.cat(rloss, 0).mean(0)
         rloss_all = torch.cat(rloss_all, 0).mean(0)
         return rloss.item(), rloss_all.numpy()
+
+    def train(
+        self,
+        max_epochs: Optional[int] = None,
+        lr: float = 0.005,
+        use_gpu: Optional[bool] = None,
+        train_size: float = 0.9,
+        validation_size: Optional[float] = None,
+        batch_size: int = 128,
+        n_epochs_kl_warmup: int = 50,
+        plan_kwargs: Optional[dict] = None,
+        **trainer_kwargs,
+    ):
+        update_dict = {
+            "lr": lr,
+            "n_epochs_kl_warmup": n_epochs_kl_warmup,
+        }
+        if plan_kwargs is not None:
+            plan_kwargs.update(update_dict)
+        else:
+            plan_kwargs = update_dict
+
+        if max_epochs is None:
+            n_cells = self.adata.n_obs
+            max_epochs = np.min([round((20000 / n_cells) * 400), 400])
+
+        plan_kwargs = plan_kwargs if isinstance(plan_kwargs, dict) else dict()
+
+        data_splitter = DataSplitter(
+            self.adata,
+            train_size=train_size,
+            validation_size=validation_size,
+            batch_size=batch_size,
+            use_gpu=use_gpu,
+        )
+        self._train_dl = data_splitter()[0]
+        training_plan = CustomTrainingPlan(
+            self.module, len(data_splitter.train_idx), **plan_kwargs
+        )
+        runner = TrainRunner(
+            self,
+            training_plan=training_plan,
+            data_splitter=data_splitter,
+            max_epochs=max_epochs,
+            use_gpu=use_gpu,
+            **trainer_kwargs,
+        )
+        return runner()

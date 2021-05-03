@@ -6,8 +6,8 @@ import torch
 from scvi import _CONSTANTS
 from scvi._compat import Literal
 from scvi.distributions import NegativeBinomial
-from scvi.module.base import BaseModuleClass, LossRecorder, auto_move_data
 from scvi.module import MRDeconv
+from scvi.module.base import BaseModuleClass, LossRecorder, auto_move_data
 from scvi.nn import FCLayers
 from torch.distributions import Normal
 
@@ -328,7 +328,6 @@ class HSTDeconv(MRDeconv):
         glo_neg_log_likelihood_prior = loss_dict["glo_neg_log_likelihood_prior"]
         reconst_loss_all = loss_dict["reconst_loss_all"]
         loss_rec = LossRecorder(
-            # loss, reconst_loss, neg_log_likelihood_prior, glo_neg_log_likelihood_prior
             loss,
             reconst_loss,
             reg,
