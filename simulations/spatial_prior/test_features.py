@@ -28,7 +28,6 @@ import logging
 
 sys.path.append("/data/yosef2/users/pierreboyeau/DestVI-reproducibility/simulations")
 from utils import (
-    discrete_histogram,
     find_location_index_cell_type,
     get_mean_normal,
     metrics_vector,
@@ -57,6 +56,62 @@ WORKING_DIR = "/data/yosef2/users/pierreboyeau/scvi-tools/simulations_code"
 input_dir = os.path.join(WORKING_DIR, "out/")
 sc_adata = sc.read_h5ad(input_dir + "sc_simu.h5ad")
 st_adata = sc.read_h5ad(input_dir + "st_simu.h5ad")
+
+
+def destvi_get_metrics(spatial_model):
+    # second get the proportion estimates
+    proportions = spatial_model.get_proportions().values
+    agg_prop_estimates = proportions
+
+    # third impute at required locations
+    # for each cell type, query the model at certain locations and compare to groundtruth
+    # create a global flush for comparaison across cell types
+    imputed_expression = np.zeros_like(s_groundtruth)
+    for ct in range(C):
+        indices, _ = find_location_index_cell_type(
+            st_adata.obsm["locations"], ct, s_location, s_ct
+        )
+        expression = spatial_model.get_scale_for_ct(
+            spatial_model.cell_type_mapping[ct], indices=indices
+        ).values
+        normalized_expression = expression / np.sum(expression, axis=1)[:, np.newaxis]
+        # flush to global
+        indices_gt = np.where(s_ct == ct)[0]
+        imputed_expression[indices_gt] = normalized_expression
+    all_res = []
+    all_res_long = []
+    for ct in range(C):
+        # get local scores
+        indices_gt = np.where(s_ct == ct)[0]
+        # potentially filter genes for local scores only
+        gene_list = np.unique(
+            np.hstack([np.where(components_[ct, i] != 0)[0] for i in range(D)])
+        )
+        res = metrics_vector(
+            s_groundtruth[indices_gt],
+            imputed_expression[indices_gt],
+            scaling=2e5,
+            feature_shortlist=gene_list,
+        )
+        res_long = metrics_vector(
+            s_groundtruth[indices_gt], imputed_expression[indices_gt], scaling=2e5
+        )
+        all_res.append(pd.Series(res))
+        all_res_long.append(pd.Series(res_long))
+    all_res.append(
+        pd.Series(metrics_vector(s_groundtruth, imputed_expression, scaling=2e5))
+    )
+    all_res = all_res + all_res_long
+    df = pd.concat(all_res, axis=1)
+    prop_score = metrics_vector(st_adata.obsm["cell_type"], agg_prop_estimates)
+    df = pd.concat([df, pd.Series(prop_score)], axis=1)
+    df.columns = (
+        ["ct" + str(i) for i in range(5)]
+        + ["ct_long" + str(i) for i in range(5)]
+        + ["allct", "proportions"]
+    )
+    return df.T.reset_index().rename(columns=dict(index="where_ct"))
+
 
 scvi.data.setup_anndata(sc_adata, labels_key="cell_type")
 mapping = sc_adata.uns["_scvi"]["categorical_mappings"]["_scvi_labels"]["mapping"]
@@ -114,18 +169,18 @@ spatial_model_prior = DestVISpatial.from_rna_model(
     sc_model,
     vamp_prior_p=100,
     amortization=amortization,
-    spatial_prior=True, 
+    spatial_prior=True,
     spatial_agg="pair",
-    lamb=2.,
+    lamb=2.0,
 )
 spatial_model_prior.train(
-    max_epochs=2000,
+    max_epochs=1,
     train_size=1,
-    lr=1e-2, 
+    lr=1e-2,
     n_epochs_kl_warmup=400,
     progress_bar_refresh_rate=0,
 )
-# df = destvi_get_metrics(spatial_model_prior)
+df = destvi_get_metrics(spatial_model_prior)
 
 spatial_model_gt = DestVISpatial.from_rna_model(
     st_adata,
@@ -141,6 +196,8 @@ spatial_model_gt.train(
     n_epochs_kl_warmup=100,
     progress_bar_refresh_rate=1,
 )
+
+df = destvi_get_metrics(spatial_model_gt)
 
 
 expression = sc_model.get_normalized_expression()
@@ -168,27 +225,9 @@ hs = hotspot.Hotspot(expression_, model="none", latent=latent_)
 hs.create_knn_graph(weighted_graph=False, n_neighbors=3)
 hs_results = hs.compute_autocorrelations()
 
-# hs_genes = hs_results.loc[hs_results.FDR < 0.05].index # Select genes
-# hs_genes = hs_results.index
-# local_correlations = hs.compute_local_correlations(
-#     hs_genes, jobs=40
-# )  # jobs for parallelization
-
-# modules = hs.create_modules(min_gene_threshold=30, core_only=False, fdr_threshold=0.05)
-
-
-# gene_train_indices = (
-#     modules.groupby(modules)
-#     .apply(lambda x: x.sample(frac=0.5).index.to_series().astype(int))
-#     .to_frame("indices")
-#     .reset_index()
-#     .indices.values
-# )
-
 nfolds = 2
 ngenes = st_adata.X.shape[-1]
 heldout_folds = np.arange(nfolds)
-# gene_folds = np.isin(np.arange(ngenes), gene_train_indices)
 gene_folds = np.isin(np.arange(ngenes), np.random.permutation(ngenes)[:200])
 
 
@@ -200,9 +239,6 @@ for heldout in heldout_folds[:-1]:
 
 
 # # # ### Grid search
-# # training_mask = gene_folds != heldout
-# # training_mask = torch.tensor(training_mask)
-# # test_mask = ~training_mask
 lamb = 1.0
 spatial_model = DestVISpatial.from_rna_model(
     st_adata,
@@ -225,19 +261,10 @@ spatial_model.train(
         loss_mask=training_mask,
     ),
     progress_bar_refresh_rate=1,
-    # plan_class=CustomTrainingPlan,
 )
 rec_loss, rec_loss_all = spatial_model.get_metric()
 
-
-# # pass_results = pd.DataFrame(spatial_model.history).assign(
-# #     heldout=heldout,
-# #     lamb=lamb,
-# #     train_phase=True,
-# # )
-# # cv_results = cv_results.append(pass_results, ignore_index=True)
-
-# # # Step 2: heldout genes
+# Step 2: heldout genes
 myparameters = [spatial_model.module.eta] + [spatial_model.module.beta]
 myparameters = filter(lambda p: p.requires_grad, myparameters)
 spatial_model.train(
@@ -251,20 +278,19 @@ spatial_model.train(
         myparameters=myparameters,
     ),
 )
+cv_results_metrics = pd.DataFrame()
 rec_loss, rec_loss_all = spatial_model.get_metric()
-
-# # spatial_model.save(mdl_path)
-# # pass_results = pd.DataFrame(spatial_model.history).assign(
-# #     heldout=heldout, lamb=lamb, train_phase=False
-# # )
-# # cv_results = cv_results.append(pass_results, ignore_index=True)
-# # cv_results.to_pickle(os.path.join(WORKING_DIR, "spatial_cv.pickle"))
-
-# # rec_loss, rec_loss_all = spatial_model.get_metric()
-# # gene_infos = pd.DataFrame(
-# #     {
-# #         "gene": ["full"] + list(np.arange(len(rec_loss_all))),
-# #         "reconstruction": [rec_loss] + list(rec_loss_all),
-# #     }
-# # ).assign(heldout=heldout, lamb=lamb, train_phase=False)
-# # cv_results_metrics = cv_results_metrics.append(gene_infos, ignore_index=True)
+gene_infos = pd.DataFrame(
+    {
+        "gene": ["full"] + list(np.arange(len(rec_loss_all))),
+        "reconstruction": [rec_loss] + list(rec_loss_all)
+    }
+).assign(
+    heldout=heldout,
+    lamb=lamb,
+    train_phase=False
+)
+cv_results_metrics = cv_results_metrics.append(gene_infos, ignore_index=True)
+# pass_results = pd.DataFrame(spatial_model.history).assign(
+#     heldout=heldout, lamb=lamb, train_phase=False
+# )
