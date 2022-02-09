@@ -36,8 +36,8 @@ def cleanup_anndata(nova_data, G=G):
             "Neutrophils": "NA",
                "Ly6-high monocytes": "NA",
                "Cxcl9-high monocytes": "NA",
-              "Macrophages": "NA",
-              "cDC1s":"NA",
+            #   "Macrophages": "NA",
+            #   "cDC1s":"NA",
                "NK cells":"NA",
                "GD T cells":"NA",
                "cDC2s":"NA",
@@ -76,7 +76,7 @@ def build_parameters_from_scrna_seq(nova_data):
     sc.pp.log1p(nova_data)
     nova_data.raw = nova_data
     transformer = {}
-    for t, ct in enumerate(np.unique(nova_data.obs["broad_cell_types"])):
+    for t, ct in enumerate(nova_data.obs["broad_cell_types"].value_counts().index.values):
         print(t, ct)
         transformer[t] = SparsePCA(n_components=4, random_state=0, alpha=5)
         transformer[t].fit(nova_data.X[nova_data.obs["broad_cell_types"] == ct].A[:, :])
@@ -95,17 +95,17 @@ def build_parameters_from_scrna_seq(nova_data):
 
 
 if __name__ == '__main__':
-    nova_data = sc.read_h5ad(path + "nova_final_data.h5ad")
+    nova_data = sc.read_h5ad(param_path + "nova_final_data.h5ad")
     nova_data = cleanup_anndata(nova_data, G=G)
     # STEP 1: learn scVI to get dispersions
     scvi.data.setup_anndata(nova_data, layer="counts")
     model = scvi.model.SCVI(nova_data, n_latent=10)
     model.train(max_epochs=15)
     dispersion = torch.exp(model.module.px_r.detach()).cpu().numpy()
-    np.save(path+ "inv-dispersion.npy", dispersion)
+    np.save(param_path + "inv-dispersion.npy", dispersion)
     # STEP 2: load Stereoscope parameters to get multiplicative factors
     # np.save(path + "beta_stereoscope.npy", spatial_model.module.beta.detach().cpu().numpy())
     # STEP 3: learn sparsePCA for intra-cell type variations
-    mean_, components_ = build_parameters_from_scrna_seq(nova_data, G=G)
-    np.savez(path + 'grtruth_PCA.npz', mean_=mean_, components_=components_)
+    mean_, components_ = build_parameters_from_scrna_seq(nova_data)
+    np.savez(param_path + 'grtruth_PCA.npz', mean_=mean_, components_=components_)
 

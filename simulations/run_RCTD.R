@@ -88,7 +88,7 @@ single_cell@meta.data$cluster = meta
 names(single_cell@meta.data$orig.ident) <- rownames(adata$obs)
 
 
-myRCTD <- create.RCTD(spatial, single_cell, max_cores = 1)
+myRCTD <- create.RCTD(spatial, single_cell, max_cores = 1, CELL_MIN_INSTANCE = 1)
 myRCTD <- run.RCTD(myRCTD, doublet_mode = FALSE)
 
 results <- myRCTD@results

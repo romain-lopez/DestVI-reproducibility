@@ -46,7 +46,8 @@ def main(input_dir, model_subdir, model_string):
     grtruth_PCA = np.load(PCA_path)
     mean_, components_ = grtruth_PCA["mean_"], grtruth_PCA["components_"]
 
-    C = components_.shape[0]
+    # C = components_.shape[0]
+    C = 5
     D = components_.shape[1]
     G = components_.shape[2]
     sc_adata = sc.read_h5ad(input_dir + "sc_simu.h5ad")
@@ -91,6 +92,7 @@ def main(input_dir, model_subdir, model_string):
         spatial_model = SpatialStereoscope.load(input_dir+model_subdir, st_adata)
         index = int(model_string[-1])
         nb_sub_ct = st_adata.uns["target_list"][index]
+        key_clustering = st_adata.uns["key_clustering"][index]
 
         # second get the proportion estimates
         proportions = spatial_model.get_proportions().values
@@ -105,15 +107,31 @@ def main(input_dir, model_subdir, model_string):
         for ct in range(C):
             indices, _ = find_location_index_cell_type(st_adata.obsm["locations"], ct, 
                                                 s_location, s_ct)
-            # hierarchical clusters in Stereoscope
-            partial_cell_type = proportions[indices, nb_sub_ct*ct:nb_sub_ct*ct+nb_sub_ct] 
-            partial_cell_type /= np.sum(partial_cell_type, axis=1)[:, np.newaxis] # shape (cells, nb_sub_ct)
-            expression = np.zeros(shape=(indices.shape[0], G))
-            for t in range(nb_sub_ct):
-                y = np.array(indices.shape[0] * [spatial_model.cell_type_mapping[t + nb_sub_ct * ct]])
-                expression += partial_cell_type[:, [t]] * spatial_model.get_scale_for_ct(y)
+            if nb_sub_ct > 1:
+                # hierarchical clusters in Stereoscope
+                partial_cell_type = proportions[indices, nb_sub_ct*ct:nb_sub_ct*ct+nb_sub_ct] 
+                partial_cell_type /= np.sum(partial_cell_type, axis=1)[:, np.newaxis] # shape (cells, nb_sub_ct)
+                expression = np.zeros(shape=(indices.shape[0], G))
+                for t in range(nb_sub_ct):
+                    mask = sc_adata.obs[key_clustering] == t + nb_sub_ct * ct
+                    average = np.mean(sc_adata.X[mask].A, axis=0)
+                    expression += partial_cell_type[:, [t]] * average
+            else:
+                # smooth sc-gene expression in cell type
+                mask = sc_adata.obs["cell_type"] == ct
+                expression = np.mean(sc_adata.X[mask].A, axis=0)
+            # old imputation code
+            # for t in range(nb_sub_ct):
+            #     y = np.array(indices.shape[0] * [spatial_model.cell_type_mapping[t + nb_sub_ct * ct]])
+            #     expression += partial_cell_type[:, [t]] * spatial_model.get_scale_for_ct(y)
 
             normalized_expression = expression / np.sum(expression, axis=1)[:, np.newaxis]
+            # flush to global
+            indices_gt = np.where(s_ct == ct)[0]
+            imputed_expression[indices_gt] = normalized_expression
+
+
+            # normalized_expression = expression / np.sum(expression, axis=1)[:, np.newaxis]
             # flush to global
             indices_gt = np.where(s_ct == ct)[0]
             imputed_expression[indices_gt] = normalized_expression
@@ -153,14 +171,27 @@ def main(input_dir, model_subdir, model_string):
             indices_gt = np.where(s_ct == ct)[0]
             imputed_expression[indices_gt] = normalized_expression
 
-    elif "RCTD" in model_string or "Spotlight" in model_string or "Seurat" in model_string:
+    elif "RCTD" in model_string or "Spotlight" in model_string or "Seurat" in model_string or "cell2location" in model_string:
         index = int(model_string[-1])
         nb_sub_ct = st_adata.uns["target_list"][index]
         key_clustering = st_adata.uns["key_clustering"][index]
 
         # read results from csv file
         # second get the proportion estimates
-        proportions = pd.read_csv(input_dir+model_subdir + '/output_weights.csv', index_col=0).values
+        if "cell2location" in model_string:
+            proportions = pd.read_csv(input_dir + model_subdir + "/results/W_cell_density.csv", index_col=0).values
+            proportions = proportions / np.sum(proportions, axis=1)[:, None]
+        else:
+            import re
+            def extract_last_text(text):
+                return list(map(int, re.findall(r'\d+', text)))[-1]
+            def reorder_df_columns(df):
+                df.columns = [extract_last_text(x) for x in df.columns]
+                return df.loc[:, range(len(df.columns))]
+
+            proportions = pd.read_csv(input_dir+model_subdir + '/output_weights.csv', index_col=0)
+            proportions = reorder_df_columns(proportions).values
+        
         agg_prop_estimates = proportions[:, ::nb_sub_ct]
         for i in range(1, nb_sub_ct):
             agg_prop_estimates += proportions[:, i::nb_sub_ct]
@@ -190,7 +221,9 @@ def main(input_dir, model_subdir, model_string):
                 # smooth sc-gene expression in cell type
                 mask = sc_adata.obs["cell_type"] == ct
                 expression = np.mean(sc_adata.X[mask].A, axis=0)
-            normalized_expression = expression / np.sum(expression)
+                expression = np.repeat(expression[np.newaxis, :], n_indices, axis=0)
+
+            normalized_expression = expression / np.sum(expression, axis=1)[:, np.newaxis]
             # flush to global
             indices_gt = np.where(s_ct == ct)[0]
             imputed_expression[indices_gt] = normalized_expression
@@ -211,7 +244,7 @@ def main(input_dir, model_subdir, model_string):
         res_long = metrics_vector(s_groundtruth[indices_gt], imputed_expression[indices_gt], scaling=2e5)
         all_res.append(pd.Series(res))
         all_res_long.append(pd.Series(res_long))
-
+    
     all_res.append(pd.Series(metrics_vector(s_groundtruth, imputed_expression, scaling=2e5)))
     all_res = all_res + all_res_long
     df = pd.concat(all_res, axis=1)

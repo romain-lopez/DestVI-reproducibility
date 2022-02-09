@@ -9,6 +9,8 @@ Created on 2020/02/03
 """
 
 import os
+# this line forces theano to use the GPU and should go before importing cell2location
+os.environ["THEANO_FLAGS"] = 'device=cuda0,floatX=float32,force_device=True'
 import click
 import numpy as np
 import scanpy as sc
@@ -67,7 +69,7 @@ def main(input_dir, output_suffix, index_key):
                             },
 
         train_args={'use_raw': True, # By default uses raw slots in both of the input datasets.
-                    'n_iter': 40000, # Increase the number of iterations if needed (see QC below)
+                    'n_iter': 10000, # Increase the number of iterations if needed (see QC below)
 
                     # Whe analysing the data that contains multiple experiments,
                     # cell2location automatically enters the mode which pools information across experiments

@@ -14,6 +14,7 @@ import numpy as np
 
 import scanpy as sc
 import matplotlib.pyplot as plt
+from scipy.sparse import data
 import seaborn as sns
 import pandas as pd
 import anndata
@@ -22,6 +23,7 @@ import harmonypy as hm
 from sklearn.decomposition import PCA
 import scanorama
 import scvi
+import scipy.sparse
 
 scvi.settings.reset_logging_handler()
 import logging
@@ -54,18 +56,22 @@ def main(input_dir, algorithm, output_suffix):
     if algorithm == "Harmony":
         dat1 = sc_adata.X.A
         dat2 = st_adata.X.A
-        data_mat = PCA(n_components=25).fit_transform(np.log(1 + np.vstack([dat1, dat2])))
+        data_mat = PCA(n_components=10).fit_transform(np.log(1 + np.vstack([dat1, dat2])))
         meta_data = pd.DataFrame(data= dat1.shape[0] * ["b1"] + dat2.shape[0] * ["b2"], columns=["batch"])
         ho = hm.run_harmony(data_mat, meta_data, ["batch"])
         embedding1, embedding2 = ho.Z_corr.T[:dat1.shape[0]], ho.Z_corr.T[dat1.shape[0]:]
     elif algorithm == "Scanorama":
-        integrated, genes = scanorama.integrate([sc_adata.X, st_adata.X], [sc_adata.var.index, st_adata.var.index], dimred=25)
+        integrated, genes = scanorama.integrate([sc_adata.X, st_adata.X], [sc_adata.var.index, st_adata.var.index], dimred=10)
         embedding1, embedding2 = integrated
     elif algorithm == "scVI":
-        concat_adata = anndata.concat([sc_adata, st_adata], label="dataset")
+        X = scipy.sparse.vstack([sc_adata.X, st_adata.X])
+        obs_index = np.concatenate([sc_adata.obs.index, st_adata.obs.index])
+        data = np.concatenate([np.zeros_like(sc_adata.obs.index), np.ones_like(st_adata.obs.index)]).astype(str)
+        obs = pd.DataFrame(data=data, index=obs_index, columns=["dataset"])
+        concat_adata = anndata.AnnData(X, obs, sc_adata.var)
         concat_adata.obs_names_make_unique()
         scvi.data.setup_anndata(concat_adata, batch_key="dataset")
-        model = scvi.model.SCVI(concat_adata, n_latent=25)
+        model = scvi.model.SCVI(concat_adata, n_latent=10)
         model.train(max_epochs=15)
         embedding1 = model.get_latent_representation(concat_adata[concat_adata.obs["dataset"] == "0"])
         embedding2 = model.get_latent_representation(concat_adata[concat_adata.obs["dataset"] == "1"])

@@ -33,7 +33,6 @@ def get_mean_normal(cell_types, gamma, mean_, components_):
             mean_normal[spot, cell] += np.dot(g, c)[0]
     return mean_normal
 
-
 def metrics_vector(groundtruth, predicted, scaling=1, feature_shortlist=None):
     res = {}
     if feature_shortlist is not None:
@@ -41,13 +40,35 @@ def metrics_vector(groundtruth, predicted, scaling=1, feature_shortlist=None):
         groundtruth = groundtruth[:, feature_shortlist].copy()
         predicted = predicted[:, feature_shortlist].copy()
     n = predicted.shape[0]
-    g = predicted.shape[1]       
+    g = predicted.shape[1]   
+    ct_weight = np.sum(groundtruth, axis=0)  
+    ct_weight = ct_weight / np.sum(ct_weight)
+    ct_iweight = 1 / ct_weight
+    ct_iweight = ct_iweight / np.sum(ct_iweight)
+
     # correlations metrics
-    res["avg_spearman"] = np.nan_to_num(np.mean([spearmanr(groundtruth[:, i], predicted[:, i] ).correlation for i in range(g)]))
-    res["avg_pearson"] = np.nan_to_num(np.mean([pearsonr(groundtruth[:, i], predicted[:, i])[0] for i in range(g)]))
+    spearman_list = np.nan_to_num([spearmanr(groundtruth[:, i], predicted[:, i] ).correlation for i in range(g)])
+    pearson_list = np.nan_to_num([pearsonr(groundtruth[:, i], predicted[:, i])[0] for i in range(g)])
+    res["avg_spearman"] = np.mean(spearman_list)
+    res["avg_pearson"] = np.mean(pearson_list)
+
+    res["w_spearman"] = np.sum(ct_weight * spearman_list)
+    res["w_pearson"] = np.sum(ct_weight * pearson_list)  
+
+    res["iw_spearman"] = np.sum(ct_iweight * spearman_list)
+    res["iw_pearson"] = np.sum(ct_iweight * pearson_list)  
+
     # error metrics
-    res["median_l1"] = np.median(np.abs(scaling * groundtruth - scaling * predicted))
-    res["mse"] = np.sqrt(np.mean((scaling * groundtruth - scaling * predicted)**2))
+    diff = scaling * groundtruth - scaling * predicted
+    res["median_l1"] = np.median(np.abs(diff))
+    res["mse"] = np.sqrt(np.mean(diff**2))
+
+    res["w_median_l1"] = np.sum(ct_weight * np.median(np.abs(diff), axis=0))
+    res["w_mse"] = np.sqrt( np.sum(ct_weight * np.mean(diff**2, axis=0)))
+
+    res["iw_median_l1"] = np.sum(ct_iweight * np.median(np.abs(diff), axis=0))
+    res["iw_mse"] = np.sqrt( np.sum(ct_iweight * np.mean(diff**2, axis=0)))
+
     return res
 
 @jit(nopython=True)
